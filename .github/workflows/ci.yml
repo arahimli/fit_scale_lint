@@ -44,13 +44,18 @@ jobs:
 
       - run: dart test
 
+      # Newer SDKs warn that legacy analyzer plugins (custom_lint) are
+      # deprecated, and Flutter 3.47+ deprecates material.dart; neither
+      # fails the build. Errors still do.
+      - name: Analyze example
+        working-directory: example
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
       # Every rule must report exactly on the lines marked expect_lint,
       # and nothing else may report.
       - name: custom_lint on the example
         working-directory: example
-        run: |
-          flutter analyze --no-fatal-infos
-          dart run custom_lint
+        run: dart run custom_lint
 
       - name: Publish dry run
         if: matrix.flutter == 'stable'
