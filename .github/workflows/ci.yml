@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Flutter ${{ matrix.flutter }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Lowest version supported (custom_lint 0.7 / analyzer 6), and the
+        # latest stable (an empty version means latest on the channel).
+        include:
+          - flutter: '3.24.5'
+            version: '3.24.5'
+          - flutter: stable
+            version: ''
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ matrix.version }}
+          channel: stable
+          cache: true
+
+      # The tests resolve their sources inside example/, so it needs its
+      # packages too.
+      - run: flutter pub get
+      - run: flutter pub get
+        working-directory: example
+
+      # The formatter's style changed in Dart 3.7; check with the latest.
+      - name: Format
+        if: matrix.flutter == 'stable'
+        run: dart format --output=none --set-exit-if-changed lib test example/lib
+
+      - name: Analyze
+        run: dart analyze --fatal-infos
+
+      - run: dart test
+
+      # Every rule must report exactly on the lines marked expect_lint,
+      # and nothing else may report.
+      - name: custom_lint on the example
+        working-directory: example
+        run: |
+          flutter analyze --no-fatal-infos
+          dart run custom_lint
+
+      - name: Publish dry run
+        if: matrix.flutter == 'stable'
+        run: dart pub publish --dry-run

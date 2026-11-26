@@ -1,0 +1,19 @@
+name: fit_scale_lint_example
+description: Every fit_scale_lint rule firing, next to code that passes.
+publish_to: none
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  fit_scale: ^0.7.1
+  # Only for lib/screenutil_import.dart.
+  flutter_screenutil: ^5.9.0
+
+dev_dependencies:
+  custom_lint: ">=0.7.0 <0.9.0"
+  fit_scale_lint:
+    path: ../
