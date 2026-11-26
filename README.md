@@ -202,7 +202,13 @@ worth supporting.
 Tested on Flutter 3.24.3 (Dart 3.5, custom_lint 0.7.0, analyzer 6.7) and
 Flutter 3.38.9 (Dart 3.10, custom_lint 0.8.1, analyzer 8.4), and with
 analyzer 7.6 (custom_lint 0.8.0). CI runs the oldest supported Flutter
-and the latest stable.
+(3.24.5) and the latest stable (3.50.1 at the time of release).
+
+Recent SDKs show a warning on the `plugins:` line of
+`analysis_options.yaml`: legacy analyzer plugins such as custom_lint are
+deprecated in favour of `analysis_server_plugin` and will be removed in a
+future Dart release. The rules still run; the warning is about the plugin
+system, not about this package.
 
 When you run custom_lint with a Flutter version that is not the one on
 your `PATH` (fvm, for example), put that version first on `PATH`:
