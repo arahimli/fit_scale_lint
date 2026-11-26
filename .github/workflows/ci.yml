@@ -57,6 +57,11 @@ jobs:
         working-directory: example
         run: dart run custom_lint
 
+      # Newer SDK tooling may rewrite example/analysis_options.yaml while
+      # analyzing; show what changed, then publish from a clean tree.
       - name: Publish dry run
         if: matrix.flutter == 'stable'
-        run: dart pub publish --dry-run
+        run: |
+          git diff
+          git checkout -- .
+          dart pub publish --dry-run
