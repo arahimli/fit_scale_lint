@@ -1,3 +1,5 @@
 analyzer:
+  exclude:
+    - build/**
   plugins:
     - custom_lint
