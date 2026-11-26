@@ -1,11 +1,14 @@
 # fit_scale_lint
 
-Lint rules and quick fixes for the layout habits that break on small
-screens and with large system text: fixed heights around text, squares
-scaled on two axes, touch targets sized with `.h`, and
-`flutter_screenutil` imports. Each warning shows in the IDE as you type,
-and most come with a one-click fix that moves the code to
-[fit_scale](https://pub.dev/packages/fit_scale).
+An analyzer plugin with warnings and quick fixes for the layout habits
+that break on small screens and with large system text: fixed heights
+around text, squares scaled on two axes, touch targets sized with `.h`,
+and `flutter_screenutil` imports. The warnings show in the IDE as you type
+and in `dart analyze` / `flutter analyze`, and each comes with a quick fix
+that moves the code to [fit_scale](https://pub.dev/packages/fit_scale).
+
+Needs Dart 3.10 / Flutter 3.38 or newer. On older Flutter versions use
+[0.1.x](#flutter-324-to-337-01x), built on custom_lint.
 
 | Rule | Catches | Quick fix | Severity |
 | --- | --- | --- | --- |
@@ -16,11 +19,17 @@ and most come with a one-click fix that moves the code to
 
 ## Setup
 
-Add `custom_lint` and this package to `dev_dependencies`:
+Enable the plugin in `analysis_options.yaml` (a top-level `plugins:`
+section, not the one under `analyzer:`):
 
-```sh
-flutter pub add dev:custom_lint dev:fit_scale_lint
+```yaml
+plugins:
+  fit_scale_lint: ^0.2.0
 ```
+
+That is all: there is no `dev_dependencies` entry, because the analysis
+server resolves plugins on its own, apart from your app's dependencies.
+Your `analyzer`, `build_runner` or `melos` versions do not matter.
 
 The quick fixes write `FitBox`, `FitSquare` and `.tap`, which come from
 `fit_scale`:
@@ -29,28 +38,12 @@ The quick fixes write `FitBox`, `FitSquare` and `.tap`, which come from
 flutter pub add fit_scale
 ```
 
-Enable the plugin in `analysis_options.yaml`:
-
-```yaml
-analyzer:
-  plugins:
-    - custom_lint
-```
-
 Restart the analysis server (VS Code: *Dart: Restart Analysis Server*;
 Android Studio: *Restart Dart Analysis Server*) and the warnings appear in
-the editor. The quick fixes are in the usual light-bulb menu
-(`Ctrl+.` / `Cmd+.`, `Alt+Enter`).
-
-`dart analyze` and `flutter analyze` do not run analyzer plugins. To check
-from the command line or CI, run:
-
-```sh
-dart run custom_lint
-```
-
-It exits with a non-zero code when it finds anything, and
-`dart run custom_lint --fix` applies every quick fix.
+the editor, with quick fixes in the usual light-bulb menu
+(`Ctrl+.` / `Cmd+.`, `Alt+Enter`). `dart analyze` and `flutter analyze`
+report them too, so CI needs nothing extra. Plugin quick fixes are applied
+one at a time from the IDE; `dart fix` does not apply them.
 
 ## Rules
 
@@ -77,7 +70,9 @@ inside one, the fix adds `interactive: true` so the minimum height also
 never drops below the touch-target size.
 
 Not reported: boxes without text, spacing (`SizedBox(height: 16.h)`),
-`height: 0` or `double.infinity`, named constructors such as
+`height: 0` or `double.infinity`, heights read from the layout
+(`size.height`, `constraints.maxHeight`, `MediaQuery…`), named
+constructors such as
 `SizedBox.square`, a `Container` with `constraints`, and text inside a
 scrollable (`ListView`, `SingleChildScrollView`, …), `FittedBox`,
 `FitText` or `FitBox`. When fixed boxes are nested, only the one closest
@@ -100,9 +95,9 @@ FitSquare(size: 56, child: CircleAvatar())
 Image.asset('assets/logo.png', width: 32.r, height: 32.r)
 ```
 
-Quick fix: *Replace with FitSquare* for a `SizedBox` with only `width`,
-`height`, `child` and `key`; *Scale both sides with .r* for anything
-else.
+Quick fixes: *Replace with FitSquare* (for a `SizedBox` with only
+`width`, `height`, `child` and `key`) and *Scale both sides with .r* (any
+widget).
 
 Not reported: different sizes (`width: 120.w, height: 48.h`), `.r` or
 `.w` on both sides, plain numbers.
@@ -164,62 +159,74 @@ see the [fit_scale migration guide](https://pub.dev/packages/fit_scale).
 
 ## Configuration
 
-Turn a rule off for the whole project:
+The rules are warnings, so they are on by default. Turn one off for the
+whole project:
 
 ```yaml
-custom_lint:
-  rules:
-    - screenutil_import: false
+plugins:
+  fit_scale_lint:
+    version: ^0.2.0
+    diagnostics:
+      screenutil_import: false
 ```
 
-Or for one line or file, like any lint:
+Or for one line or file, with the plugin name in front of the rule:
 
 ```dart
-// ignore: fixed_height_around_text
+// ignore: fit_scale_lint/fixed_height_around_text
 SizedBox(height: 48, child: Text('Always one short word')),
 
-// ignore_for_file: separately_scaled_square
+// ignore_for_file: fit_scale_lint/separately_scaled_square
 ```
 
-## Why custom_lint and not analysis_server_plugin
-
-Dart 3.10 introduced first-party analyzer plugins
-(`analysis_server_plugin`), which run inside `dart analyze` without an
-extra command. Every release of it requires Dart 3.9 or newer (the latest
-3.13), and it pins one exact analyzer version per release.
-`fit_scale` supports Flutter 3.24 (Dart 3.5) and newer, so a plugin built
-on it would not even resolve for a large part of its users.
-
-`custom_lint` works on all of them: this package allows
-`custom_lint_builder` 0.7.0 to 0.8.x, so pub picks analyzer 6 on Flutter
-3.24 and analyzer 8 on the current stable, and the rules only use AST APIs
-that are the same in analyzer 6, 7 and 8. A version built on
-`analysis_server_plugin` can follow once Dart 3.10 is the oldest version
-worth supporting.
+Warnings make `flutter analyze` exit with a non-zero code, like any other
+warning. To adopt the rules gradually, turn the noisy ones off and enable
+them again as you fix them.
 
 ## Compatibility
 
-Tested on Flutter 3.24.3 (Dart 3.5, custom_lint 0.7.0, analyzer 6.7) and
-Flutter 3.38.9 (Dart 3.10, custom_lint 0.8.1, analyzer 8.4), and with
-analyzer 7.6 (custom_lint 0.8.0). CI runs the oldest supported Flutter
-(3.24.5) and the latest stable (3.50.1 at the time of release).
+### Flutter 3.38 and newer: 0.2.x
 
-Recent SDKs show a warning on the `plugins:` line of
-`analysis_options.yaml`: legacy analyzer plugins such as custom_lint are
-deprecated in favour of `analysis_server_plugin` and will be removed in a
-future Dart release. The rules still run; the warning is about the plugin
-system, not about this package.
+0.2.x is built on `analysis_server_plugin`, the analyzer plugin system
+that Dart 3.10 introduced. Which analyzer it runs on depends on your SDK:
+Dart 3.10 resolves analyzer 12, Dart 3.11 and 3.12 analyzer 14.5, Dart
+3.13 and newer the latest 14.x; the rules only use APIs that are the same
+in all of them. Tested on Flutter 3.38.9, 3.44.8 and 3.50.1, and on a
+real app with melos 8 and analyzer 14 code generators, which custom_lint
+cannot resolve next to.
 
-When you run custom_lint with a Flutter version that is not the one on
-your `PATH` (fvm, for example), put that version first on `PATH`:
-custom_lint resolves its plugin host by running `flutter pub get`.
+### Flutter 3.24 to 3.37: 0.1.x
+
+Before Dart 3.10 there is no first-party plugin system, so 0.1.x is built
+on [custom_lint](https://pub.dev/packages/custom_lint). It has the same
+four rules; set it up as a dev dependency:
+
+```sh
+flutter pub add dev:custom_lint dev:fit_scale_lint:^0.1.0
+```
+
+```yaml
+analyzer:
+  plugins:
+    - custom_lint
+```
+
+and run `dart run custom_lint` on the command line. custom_lint needs
+analyzer 8 or older, so it does not resolve in projects whose other dev
+dependencies need a newer analyzer, or with melos 8; and Dart deprecates
+this kind of plugin. Move to 0.2.x when you are on Flutter 3.38 or newer.
+The 0.1.x source is on the
+[`custom-lint-0.1`](https://github.com/arahimli/fit_scale_lint/tree/custom-lint-0.1)
+branch.
 
 ## Example
 
 [`example/`](https://github.com/arahimli/fit_scale_lint/tree/main/example)
-has every rule firing next to code that passes; each expected warning is
-marked with an `expect_lint` comment, so `dart run custom_lint` there
-exits cleanly only when every rule reports exactly where it should.
+has every rule firing next to code that passes, with the plugin enabled
+from the repository by path. Each expected warning is marked with an
+`expect_lint` comment, and `dart run tool/check_example.dart` (run in CI)
+fails unless every rule reports exactly on the marked lines and nowhere
+else.
 
 ## License
 

@@ -5,7 +5,3 @@ analyzer:
     - build/**
     # A separate Flutter package with its own analysis_options.yaml.
     - example/**
-  errors:
-    # One release supports analyzer 6, 7 and 8; some APIs used here are
-    # deprecated in the newer ones but are the only names in the older.
-    deprecated_member_use: ignore

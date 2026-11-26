@@ -1,8 +1,14 @@
+import 'package:analysis_server_plugin/edit/dart/correction_producer.dart';
+import 'package:analysis_server_plugin/edit/dart/dart_fix_kind_priority.dart';
+import 'package:analyzer/analysis_rule/analysis_rule.dart';
+import 'package:analyzer/analysis_rule/rule_context.dart';
+import 'package:analyzer/analysis_rule/rule_visitor_registry.dart';
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/error/error.dart' show AnalysisError, ErrorSeverity;
-import 'package:analyzer/error/listener.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/error/error.dart';
 import 'package:analyzer/source/source_range.dart';
-import 'package:custom_lint_builder/custom_lint_builder.dart';
+import 'package:analyzer_plugin/utilities/change_builder/change_builder_core.dart';
+import 'package:analyzer_plugin/utilities/fixes/fixes.dart';
 
 import '../ast_utils.dart';
 import '../fix_utils.dart';
@@ -10,19 +16,26 @@ import '../fix_utils.dart';
 /// `width: 56.w, height: 56.h`: width and height scale by different
 /// factors, so the square becomes a rectangle (and a circle an oval) as
 /// soon as the screen's proportions differ from the design.
-class SeparatelyScaledSquare extends DartLintRule {
-  const SeparatelyScaledSquare() : super(code: _code);
+class SeparatelyScaledSquare extends AnalysisRule {
+  SeparatelyScaledSquare()
+    : super(
+        name: 'separately_scaled_square',
+        description:
+            'The same size scaled with .w for width and .h for '
+            'height is not square on other aspect ratios.',
+      );
 
-  static const _code = LintCode(
-    name: 'separately_scaled_square',
-    problemMessage:
-        'The same size scaled with .w for width and .h for height is not '
-        'square on other aspect ratios.',
+  static const LintCode code = LintCode(
+    'separately_scaled_square',
+    'The same size scaled with .w for width and .h for height is not square '
+        'on other aspect ratios.',
     correctionMessage:
-        'Use FitSquare(size: …) from fit_scale, or .r for both sides.',
-    errorSeverity: ErrorSeverity.WARNING,
-    url: 'https://pub.dev/packages/fit_scale_lint#separately_scaled_square',
+        'Try FitSquare(size: …) from fit_scale, or .r for both sides.',
+    severity: DiagnosticSeverity.WARNING,
   );
+
+  @override
+  LintCode get diagnosticCode => code;
 
   /// The `(width, height)` pair this rule reports on, or null.
   static (ScaledValue, ScaledValue)? square(InstanceCreationExpression node) {
@@ -34,95 +47,108 @@ class SeparatelyScaledSquare extends DartLintRule {
   }
 
   /// Whether [node] is a `SizedBox` that `FitSquare` can replace as is.
-  ///
   static bool fitsFitSquare(InstanceCreationExpression node) {
-    if (!isUnnamed(sizedBoxChecker, node)) return false;
-    final args = node.argumentList.arguments;
-    final names = {
-      for (final a in args)
-        if (a is NamedExpression) a.name.label.name,
-    };
-    return names.length == args.length &&
+    if (!isUnnamed(node, 'SizedBox')) return false;
+    final names = argNames(node);
+    return names != null &&
         const {'key', 'width', 'height', 'child'}.containsAll(names);
   }
 
   @override
-  void run(
-    CustomLintResolver resolver,
-    ErrorReporter reporter,
-    CustomLintContext context,
+  void registerNodeProcessors(
+    RuleVisitorRegistry registry,
+    RuleContext context,
   ) {
-    context.registry.addInstanceCreationExpression((node) {
-      if (square(node) != null) {
-        reporter.atNode(node.constructorName, _code);
-      }
-    });
+    registry.addInstanceCreationExpression(this, _Visitor(this));
   }
-
-  @override
-  List<Fix> getFixes() => [_MakeSquare()];
 }
 
-/// FitSquare for a plain SizedBox, `.r` on both sides for anything else.
-///
-/// One fix class: `dart run custom_lint --fix` reruns a single fix across
-/// every lint of a rule, and applies every fix a lint offers.
-class _MakeSquare extends ContentFix {
-  @override
-  void run(
-    CustomLintResolver resolver,
-    ChangeReporter reporter,
-    CustomLintContext context,
-    AnalysisError analysisError,
-    List<AnalysisError> others,
-  ) {
-    context.registry.addInstanceCreationExpression((node) {
-      if (node.constructorName.offset != analysisError.offset) return;
-      final pair = SeparatelyScaledSquare.square(node);
-      if (pair == null) return;
-      if (SeparatelyScaledSquare.fitsFitSquare(node)) {
-        _fitSquare(reporter, content(context), node, pair.$1);
-      } else {
-        _useR(reporter, [pair.$1, pair.$2]);
-      }
-    });
-  }
+class _Visitor extends SimpleAstVisitor<void> {
+  _Visitor(this.rule);
 
-  void _fitSquare(
-    ChangeReporter reporter,
-    String content,
-    InstanceCreationExpression node,
-    ScaledValue width,
-  ) {
-    final key = namedArg(node, 'key');
-    final child = namedArg(node, 'child');
-    final unit = node.root as CompilationUnit;
-    final change = reporter.createChangeBuilder(
-      message: 'Replace with FitSquare',
-      priority: 80,
-    );
-    change.addDartFileEdit((builder) {
+  final AnalysisRule rule;
+
+  @override
+  void visitInstanceCreationExpression(InstanceCreationExpression node) {
+    if (SeparatelyScaledSquare.square(node) != null) {
+      rule.reportAtNode(node.constructorName);
+    }
+  }
+}
+
+/// `SizedBox(width: 56.w, height: 56.h)` -> `FitSquare(size: 56)`.
+class UseFitSquare extends ResolvedCorrectionProducer {
+  UseFitSquare({required super.context});
+
+  static const _kind = FixKind(
+    'fit_scale_lint.fix.useFitSquare',
+    DartFixKindPriority.standard,
+    'Replace with FitSquare',
+  );
+
+  @override
+  CorrectionApplicability get applicability =>
+      CorrectionApplicability.singleLocation;
+
+  @override
+  FixKind get fixKind => _kind;
+
+  @override
+  Future<void> compute(ChangeBuilder builder) async {
+    final offset = diagnostic?.offset;
+    if (offset == null) return;
+    final box = creationAt(node, offset);
+    if (box == null || !SeparatelyScaledSquare.fitsFitSquare(box)) return;
+    final pair = SeparatelyScaledSquare.square(box);
+    if (pair == null) return;
+    final content = unitResult.content;
+    final key = namedArg(box, 'key');
+    final child = namedArg(box, 'child');
+
+    await builder.addDartFileEdit(file, (builder) {
       final parts = [
-        if (key != null) textOf(content, key),
-        'size: ${width.designValue}',
-        if (child != null) textOf(content, child),
+        if (key != null) textOf(content, key.node),
+        'size: ${pair.$1.designValue}',
+        if (child != null) textOf(content, child.node),
       ];
-      final start = node.constructorName.offset;
+      final start = box.constructorName.offset;
       builder.addSimpleReplacement(
-        SourceRange(start, node.end - start),
+        SourceRange(start, box.end - start),
         'FitSquare(${parts.join(', ')})',
       );
       ensureFitScaleImport(builder, unit);
     });
   }
+}
 
-  void _useR(ChangeReporter reporter, List<ScaledValue> sides) {
-    final change = reporter.createChangeBuilder(
-      message: 'Scale both sides with .r',
-      priority: 80,
-    );
-    change.addDartFileEdit((builder) {
-      for (final side in sides) {
+/// `width: n.w, height: n.h` -> `width: n.r, height: n.r`.
+class ScaleBothSidesWithR extends ResolvedCorrectionProducer {
+  ScaleBothSidesWithR({required super.context});
+
+  static const _kind = FixKind(
+    'fit_scale_lint.fix.scaleBothSidesWithR',
+    DartFixKindPriority.standard - 1,
+    'Scale both sides with .r',
+  );
+
+  @override
+  CorrectionApplicability get applicability =>
+      CorrectionApplicability.singleLocation;
+
+  @override
+  FixKind get fixKind => _kind;
+
+  @override
+  Future<void> compute(ChangeBuilder builder) async {
+    final offset = diagnostic?.offset;
+    if (offset == null) return;
+    final box = creationAt(node, offset);
+    if (box == null) return;
+    final pair = SeparatelyScaledSquare.square(box);
+    if (pair == null) return;
+
+    await builder.addDartFileEdit(file, (builder) {
+      for (final side in [pair.$1, pair.$2]) {
         builder.addSimpleReplacement(
           SourceRange(side.suffix.offset, side.suffix.length),
           'r',

@@ -1,99 +1,157 @@
-// Helpers shared by the rules.
+// Helpers shared by the rules and fixes.
 //
-// Only AST APIs that are the same in analyzer 6, 7 and 8 are used here
-// (no element model), so one release works on Flutter 3.24 through the
-// latest stable. Types are matched with custom_lint's TypeChecker, which
-// hides the element-model differences.
+// One release has to work with analyzer 12 (Dart 3.10) through 14, so
+// only APIs that are the same in all of them are used here.
 
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/nullability_suffix.dart';
 import 'package:analyzer/dart/element/type.dart';
-import 'package:custom_lint_builder/custom_lint_builder.dart';
 
-TypeChecker _flutter(String name) =>
-    TypeChecker.fromName(name, packageName: 'flutter');
+/// Whether [type] is the class [name] declared in package [package].
+bool _isClass(DartType? type, String package, Set<String> names) {
+  if (type is! InterfaceType) return false;
+  final element = type.element;
+  if (!names.contains(element.name)) return false;
+  final uri = element.library.uri;
+  return uri.scheme == 'package' &&
+      uri.pathSegments.isNotEmpty &&
+      uri.pathSegments.first == package;
+}
 
-/// `SizedBox` (unnamed constructor only; `SizedBox.shrink` etc. are fine).
-final sizedBoxChecker = _flutter('SizedBox');
-
-/// `Container`.
-final containerChecker = _flutter('Container');
+/// Whether [type] or one of its supertypes is a Flutter class in [names].
+bool _isOrExtends(DartType? type, Set<String> names) {
+  if (type is! InterfaceType) return false;
+  if (_isClass(type, 'flutter', names)) return true;
+  return type.allSupertypes.any((t) => _isClass(t, 'flutter', names));
+}
 
 /// Widgets whose height grows with the system text size.
-final textChecker = TypeChecker.any([
-  _flutter('Text'),
-  _flutter('RichText'),
-  _flutter('SelectableText'),
-  _flutter('TextField'),
-  _flutter('TextFormField'),
-  _flutter('CupertinoTextField'),
-]);
+const _textWidgets = {
+  'Text',
+  'RichText',
+  'SelectableText',
+  'TextField',
+  'TextFormField',
+  'CupertinoTextField',
+};
 
 /// Widgets the user taps: buttons, tiles and gesture wrappers.
-final tapChecker = TypeChecker.any([
-  _flutter('ButtonStyleButton'), // Elevated/Filled/Outlined/TextButton
-  _flutter('IconButton'),
-  _flutter('FloatingActionButton'),
-  _flutter('MaterialButton'),
-  _flutter('RawMaterialButton'),
-  _flutter('CupertinoButton'),
-  _flutter('ListTile'),
-  _flutter('CheckboxListTile'),
-  _flutter('SwitchListTile'),
-  _flutter('RadioListTile'),
-  _flutter('InkResponse'), // and InkWell
-  _flutter('GestureDetector'),
-]);
+const _tapWidgets = {
+  'ButtonStyleButton', // Elevated/Filled/Outlined/TextButton
+  'IconButton',
+  'FloatingActionButton',
+  'MaterialButton',
+  'RawMaterialButton',
+  'CupertinoButton',
+  'ListTile',
+  'CheckboxListTile',
+  'SwitchListTile',
+  'RadioListTile',
+  'InkResponse', // and InkWell
+  'GestureDetector',
+};
 
 /// Single-child wrappers that do not change what the child is.
-final _wrapperChecker = TypeChecker.any([
-  _flutter('Padding'),
-  _flutter('Center'),
-  _flutter('Align'),
-  _flutter('Expanded'),
-  _flutter('Flexible'),
-  _flutter('Semantics'),
-]);
+const _wrappers = {
+  'Padding',
+  'Center',
+  'Align',
+  'Expanded',
+  'Flexible',
+  'Semantics',
+};
 
 /// Subtrees below these never overflow a fixed height: they scroll or
 /// scale their content down.
-final _stopChecker = TypeChecker.any([
-  _flutter('ListView'),
-  _flutter('GridView'),
-  _flutter('PageView'),
-  _flutter('SingleChildScrollView'),
-  _flutter('CustomScrollView'),
-  _flutter('FittedBox'),
-  _flutter('OverflowBox'),
-  TypeChecker.fromName('FitText', packageName: 'fit_scale'),
-  TypeChecker.fromName('FitBox', packageName: 'fit_scale'),
-]);
+const _stopWidgets = {
+  'ListView',
+  'GridView',
+  'PageView',
+  'SingleChildScrollView',
+  'CustomScrollView',
+  'FittedBox',
+  'OverflowBox',
+};
 
-bool _is(TypeChecker checker, InstanceCreationExpression node) {
-  final type = node.staticType;
-  return type != null && checker.isExactlyType(type);
-}
+/// Whether [node] is the unnamed constructor of the Flutter class [name],
+/// such as `SizedBox(...)` but not `SizedBox.square(...)`.
+bool isUnnamed(InstanceCreationExpression node, String name) =>
+    node.constructorName.name == null &&
+    _isClass(node.staticType, 'flutter', {name});
 
-bool _isAssignable(TypeChecker checker, InstanceCreationExpression node) {
-  final type = node.staticType;
-  return type != null && checker.isAssignableFromType(type);
-}
-
-/// Whether [node] is the unnamed constructor of a class matched by
-/// [checker], such as `SizedBox(...)` but not `SizedBox.square(...)`.
-bool isUnnamed(TypeChecker checker, InstanceCreationExpression node) =>
-    node.constructorName.name == null && _is(checker, node);
+/// `SizedBox(...)` or `Container(...)`.
+bool isHeightBox(InstanceCreationExpression node) =>
+    isUnnamed(node, 'SizedBox') || isUnnamed(node, 'Container');
 
 bool isTapWidget(InstanceCreationExpression node) =>
-    _isAssignable(tapChecker, node);
+    _isOrExtends(node.staticType, _tapWidgets);
+
+bool _isWrapper(InstanceCreationExpression node) =>
+    _isClass(node.staticType, 'flutter', _wrappers);
+
+/// A `name: value` argument.
+///
+/// Analyzer 12-13 call it `NamedExpression` and analyzer 14 `NamedArgument`
+/// (and neither type exists in the other), so it is recognised by its
+/// shape: an identifier, a colon, then the value.
+class NamedArg {
+  NamedArg._(this.node, this.name, this.expression);
+
+  /// The whole `name: value` node.
+  final AstNode node;
+
+  final String name;
+
+  /// The value.
+  final Expression expression;
+
+  int get offset => node.offset;
+  int get length => node.length;
+  int get end => node.end;
+}
+
+/// [node] as a named argument, or null when it is positional.
+NamedArg? asNamedArg(AstNode node) {
+  final name = node.beginToken;
+  final colon = name.next;
+  if (colon == null || colon.lexeme != ':' || !name.isIdentifier) return null;
+  // The value is the last child in both (`expression` in
+  // NamedExpression, `argumentExpression` in NamedArgument).
+  final value = node.childEntities.last;
+  if (value is! Expression) return null;
+  return NamedArg._(node, name.lexeme, value);
+}
+
+/// The arguments of [node] as plain AST nodes.
+List<AstNode> argsOf(InstanceCreationExpression node) => [
+  for (final AstNode a in node.argumentList.arguments) a,
+];
+
+/// The positional arguments of [args].
+List<Expression> positional(Iterable<AstNode> args) => [
+  for (final a in args)
+    if (asNamedArg(a) == null && a is Expression) a,
+];
 
 /// The named argument [name] of [node], or null.
-NamedExpression? namedArg(InstanceCreationExpression node, String name) {
-  for (final arg in node.argumentList.arguments) {
-    if (arg is NamedExpression && arg.name.label.name == name) return arg;
+NamedArg? namedArg(InstanceCreationExpression node, String name) {
+  for (final arg in argsOf(node)) {
+    final named = asNamedArg(arg);
+    if (named != null && named.name == name) return named;
   }
   return null;
+}
+
+/// Names of all arguments of [node], or null when one is positional.
+Set<String>? argNames(InstanceCreationExpression node) {
+  final names = <String>{};
+  for (final arg in argsOf(node)) {
+    final named = asNamedArg(arg);
+    if (named == null) return null;
+    names.add(named.name);
+  }
+  return names;
 }
 
 /// A `value.h` / `value.w` / ... extension access on a number.
@@ -113,8 +171,8 @@ class ScaledValue {
   String get designValue => doubleSource(target);
 }
 
-/// Returns the `56.h` parts of [e] when [e] is `<number>.<suffix>` with a
-/// suffix in [suffixes].
+/// Returns the parts of [e] when it is `<number>.<suffix>` with a suffix
+/// in [suffixes].
 ScaledValue? scaledValue(Expression? e, Set<String> suffixes) {
   if (e is PropertyAccess) {
     final target = e.target;
@@ -143,7 +201,8 @@ String doubleSource(Expression e) {
   if (e is IntegerLiteral || e is DoubleLiteral) return source;
   final type = e.staticType;
   if (type != null && type.isDartCoreDouble) return source;
-  final needsParens = e is! Identifier &&
+  final needsParens =
+      e is! Identifier &&
       e is! ParenthesizedExpression &&
       e is! PropertyAccess &&
       e is! MethodInvocation;
@@ -151,20 +210,40 @@ String doubleSource(Expression e) {
 }
 
 /// Whether [e] can be used as a non-null `double` design value.
-bool isUsableHeight(Expression e) {
-  final type = e.staticType;
-  if (type == null || type.nullabilitySuffix != NullabilitySuffix.none) {
-    return false;
-  }
-  return type.isDartCoreInt || type.isDartCoreDouble || type.isDartCoreNum;
-}
+bool isUsableHeight(Expression e) => _isNumber(e.staticType);
 
-/// Whether [height] is a real fixed height (not 0 or infinity).
+/// Whether [height] is a design-time fixed height: not 0 or infinity, and
+/// not read from the layout (`size.height`, `MediaQuery...`), which
+/// already follows the screen.
 bool isFixedHeight(Expression height) {
   if (height is IntegerLiteral && height.value == 0) return false;
   if (height is DoubleLiteral && height.value == 0) return false;
   final source = height.toSource();
-  return !source.contains('infinity') && !source.contains('maxFinite');
+  if (source.contains('infinity') ||
+      source.contains('maxFinite') ||
+      source.contains('MediaQuery')) {
+    return false;
+  }
+  return !_isSizeHeight(height);
+}
+
+/// `size.height` / `constraints.maxHeight` style reads of a layout value.
+bool _isSizeHeight(Expression e) {
+  Expression? target;
+  String? property;
+  if (e is PrefixedIdentifier) {
+    target = e.prefix;
+    property = e.identifier.name;
+  } else if (e is PropertyAccess) {
+    target = e.target;
+    property = e.propertyName.name;
+  }
+  final type = target?.staticType;
+  if (type is! InterfaceType) return false;
+  final name = type.element.name;
+  return (name == 'Size' && property == 'height') ||
+      (name == 'BoxConstraints' &&
+          (property == 'maxHeight' || property == 'minHeight'));
 }
 
 /// Whether the `child:` subtree of [box] contains a text widget that is
@@ -183,17 +262,17 @@ class _TextFinder extends RecursiveAstVisitor<void> {
   @override
   void visitInstanceCreationExpression(InstanceCreationExpression node) {
     if (found) return;
-    if (_is(textChecker, node)) {
+    final type = node.staticType;
+    if (_isClass(type, 'flutter', _textWidgets)) {
       found = true;
       return;
     }
-    if (_is(_stopChecker, node) || _isAssignable(_stopChecker, node)) return;
-    // A nested fixed-height box is reported on its own.
-    if ((isUnnamed(sizedBoxChecker, node) ||
-            isUnnamed(containerChecker, node)) &&
-        namedArg(node, 'height') != null) {
+    if (_isOrExtends(type, _stopWidgets) ||
+        _isClass(type, 'fit_scale', const {'FitText', 'FitBox'})) {
       return;
     }
+    // A nested fixed-height box is reported on its own.
+    if (isHeightBox(node) && namedArg(node, 'height') != null) return;
     super.visitInstanceCreationExpression(node);
   }
 }
@@ -205,20 +284,19 @@ bool isTapBox(InstanceCreationExpression box) {
   Expression? child = namedArg(box, 'child')?.expression;
   while (child is InstanceCreationExpression) {
     if (isTapWidget(child)) return true;
-    if (!_is(_wrapperChecker, child)) break;
+    if (!_isWrapper(child)) break;
     child = namedArg(child, 'child')?.expression;
   }
   // Up: the box is the child (through wrappers) of a tap widget.
   AstNode current = box;
   while (true) {
-    final named = current.parent;
-    if (named is! NamedExpression || named.name.label.name != 'child') {
-      return false;
-    }
-    final owner = named.parent?.parent;
+    final parent = current.parent;
+    final named = parent == null ? null : asNamedArg(parent);
+    if (named == null || named.name != 'child') return false;
+    final owner = parent!.parent?.parent;
     if (owner is! InstanceCreationExpression) return false;
     if (isTapWidget(owner)) return true;
-    if (!_is(_wrapperChecker, owner)) return false;
+    if (!_isWrapper(owner)) return false;
     current = owner;
   }
 }
@@ -231,9 +309,10 @@ String textOf(String content, AstNode node) =>
 String withoutArg(
   String content,
   InstanceCreationExpression node,
-  NamedExpression remove,
+  NamedArg removed,
 ) {
-  final args = node.argumentList.arguments;
+  final args = argsOf(node);
+  final remove = removed.node;
   final index = args.indexOf(remove);
   int start;
   int end;
@@ -251,4 +330,18 @@ String withoutArg(
   }
   return content.substring(node.offset, start) +
       content.substring(end, node.end);
+}
+
+/// The `X(...)` call whose constructor name starts at [offset], found from
+/// the node a fix was invoked on.
+InstanceCreationExpression? creationAt(AstNode node, int offset) {
+  AstNode? current = node;
+  while (current != null) {
+    if (current is InstanceCreationExpression &&
+        current.constructorName.offset == offset) {
+      return current;
+    }
+    current = current.parent;
+  }
+  return null;
 }

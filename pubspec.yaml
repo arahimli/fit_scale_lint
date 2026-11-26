@@ -1,8 +1,8 @@
 name: fit_scale_lint
 description: >-
-  Lint rules and quick fixes that catch layouts which overflow or shrink
-  touch targets on small screens, and move code to the fit_scale package.
-version: 0.1.0
+  Analyzer plugin with warnings and quick fixes for layouts that overflow or
+  shrink touch targets on small screens, moving code to fit_scale.
+version: 0.2.0
 repository: https://github.com/arahimli/fit_scale_lint
 issue_tracker: https://github.com/arahimli/fit_scale_lint/issues
 topics:
@@ -13,13 +13,18 @@ topics:
   - screen-size
 
 environment:
-  sdk: ">=3.5.0 <4.0.0"
+  sdk: ^3.10.0
 
+# Dart 3.10 resolves analysis_server_plugin 0.3.14 (analyzer 12), Dart
+# 3.11-3.12 resolve 0.3.24 (analyzer 14.5) and Dart 3.13+ the latest; the
+# rules only use APIs that are the same in all of them.
 dependencies:
-  analyzer: ">=6.6.0 <9.0.0"
-  analyzer_plugin: ">=0.11.0 <0.14.0"
-  custom_lint_builder: ">=0.7.0 <0.9.0"
+  analysis_server_plugin: ">=0.3.13 <0.4.0"
+  analyzer: ">=12.0.0 <15.0.0"
+  analyzer_plugin: ">=0.14.0 <0.15.0"
 
 dev_dependencies:
-  lints: ">=4.0.0 <7.0.0"
+  analyzer_testing: ">=0.2.4 <0.5.0"
+  lints: ^6.0.0
   test: ^1.25.0
+  test_reflective_loader: ^0.2.0

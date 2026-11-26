@@ -1,5 +1,10 @@
 analyzer:
   exclude:
     - build/**
-  plugins:
-    - custom_lint
+
+# The plugin from this repository; in your app use a version instead:
+#   plugins:
+#     fit_scale_lint: ^0.2.0
+plugins:
+  fit_scale_lint:
+    path: ../

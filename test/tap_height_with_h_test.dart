@@ -1,108 +1,102 @@
+// Test methods are named test_* for test_reflective_loader.
+// ignore_for_file: non_constant_identifier_names
+
+import 'package:analyzer/analysis_rule/analysis_rule.dart';
 import 'package:fit_scale_lint/fit_scale_lint.dart';
 import 'package:test/test.dart';
+import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import 'support.dart';
 
 void main() {
-  const rule = TapHeightWithH();
-
-  group('reports', () {
-    test('a box around a button', () async {
-      expect(
-        await lints(
-          rule,
-          widget(
-            'SizedBox(height: 40.h, '
-            'child: IconButton(onPressed: null, icon: Icon(Icons.add)))',
-          ),
-        ),
-        ['40.h'],
-      );
-    });
-
-    test('a box inside a tappable area, through Padding', () async {
-      expect(
-        await lints(
-          rule,
-          widget(
-            'InkWell(onTap: null, child: Padding(padding: EdgeInsets.zero, '
-            'child: SizedBox(height: n.h, child: Icon(Icons.close))))',
-          ),
-        ),
-        ['n.h'],
-      );
-    });
-
-    test('button style and button height arguments', () async {
-      expect(
-        await lints(
-          rule,
-          widget(
-            'Column(children: [\n'
-            '  ElevatedButton(style: ElevatedButton.styleFrom('
-            'minimumSize: Size(double.infinity, 44.h)), '
-            'onPressed: null, child: Icon(Icons.add)),\n'
-            '  FilledButton(style: FilledButton.styleFrom('
-            'fixedSize: Size.fromHeight(48.h)), '
-            'onPressed: null, child: Icon(Icons.add)),\n'
-            '  MaterialButton(height: 40.h, onPressed: null),\n'
-            '  ListTile(minTileHeight: 56.h),\n'
-            '])',
-          ),
-        ),
-        ['44.h', '48.h', '40.h', '56.h'],
-      );
-    });
+  defineReflectiveSuite(() {
+    defineReflectiveTests(TapHeightWithHTest);
   });
+}
 
-  group('does not report', () {
-    for (final entry in {
-      'not a touch target': 'SizedBox(height: 40.h, child: Icon(Icons.star))',
-      '.tap': 'SizedBox(height: 40.tap, '
-          'child: IconButton(onPressed: null, icon: Icon(Icons.add)))',
-      '.r': 'SizedBox(height: 40.r, '
-          'child: IconButton(onPressed: null, icon: Icon(Icons.add)))',
-      'a width': 'SizedBox(width: 40.w, '
-          'child: IconButton(onPressed: null, icon: Icon(Icons.add)))',
-      // Reported by fixed_height_around_text, whose fix keeps the target.
-      'text inside': 'SizedBox(height: 48.h, '
-          "child: FilledButton(onPressed: null, child: Text('Pay')))",
-      'Size width': 'ElevatedButton(style: ElevatedButton.styleFrom('
-          'minimumSize: Size(44.h, 48)), onPressed: null, child: null)',
-    }.entries) {
-      test(entry.key, () async {
-        expect(await lints(rule, widget(entry.value)), isEmpty);
-      });
-    }
-  });
+const _button = 'IconButton(onPressed: null, icon: Icon(Icons.add))';
 
-  group('quick fix', () {
-    const button = 'IconButton(onPressed: null, icon: Icon(Icons.add))';
+@reflectiveTest
+class TapHeightWithHTest extends FitRuleTest {
+  @override
+  AnalysisRule createRule() => TapHeightWithH();
 
-    test('.h -> .tap', () async {
-      expect(
-        await applyFix(
-          rule,
-          widget('SizedBox(height: 40.h, child: $button)'),
-        ),
-        widget('SizedBox(height: 40.tap, child: $button)'),
-      );
-    });
+  Future<void> test_reports_boxAroundButton() async {
+    expect(await lints(widget('SizedBox(height: 40.h, child: $_button)')), [
+      '40.h',
+    ]);
+  }
 
-    test('swaps a flutter_screenutil import for fit_scale', () async {
-      expect(
-        await applyFix(
-          rule,
-          widget(
-            'SizedBox(height: 40.h, child: $button)',
-            imports: material + screenUtil,
-          ),
-        ),
+  Future<void> test_reports_boxInsideTappableThroughPadding() async {
+    expect(
+      await lints(
         widget(
-          'SizedBox(height: 40.tap, child: $button)',
-          imports: material + fitExtensions,
+          'InkWell(onTap: null, child: Padding(padding: EdgeInsets.zero, '
+          'child: SizedBox(height: n.h, child: Icon(Icons.close))))',
         ),
-      );
-    });
-  });
+      ),
+      ['n.h'],
+    );
+  }
+
+  Future<void> test_reports_styleAndButtonArguments() async {
+    expect(
+      await lints(
+        widget(
+          'Column(children: [\n'
+          '  ElevatedButton(style: ElevatedButton.styleFrom('
+          'minimumSize: Size(double.infinity, 44.h)), '
+          'onPressed: null, child: Icon(Icons.add)),\n'
+          '  FilledButton(style: FilledButton.styleFrom('
+          'fixedSize: Size.fromHeight(48.h)), '
+          'onPressed: null, child: Icon(Icons.add)),\n'
+          '  MaterialButton(height: 40.h, onPressed: null),\n'
+          '  ListTile(minTileHeight: 56.h),\n'
+          '])',
+        ),
+      ),
+      ['44.h', '48.h', '40.h', '56.h'],
+    );
+  }
+
+  Future<void> test_noReport() async {
+    for (final code in [
+      'SizedBox(height: 40.h, child: Icon(Icons.star))',
+      'SizedBox(height: 40.tap, child: $_button)',
+      'SizedBox(height: 40.r, child: $_button)',
+      'SizedBox(width: 40.w, child: $_button)',
+      // Reported by fixed_height_around_text, whose fix keeps the target.
+      "SizedBox(height: 48.h, child: FilledButton(onPressed: null, child: Text('Pay')))",
+      'ElevatedButton(style: ElevatedButton.styleFrom('
+          'minimumSize: Size(44.h, 48)), onPressed: null)',
+    ]) {
+      expect(await lints(widget(code)), isEmpty, reason: code);
+    }
+  }
+
+  Future<void> test_fix_tap() async {
+    expect(
+      await applyFix(
+        UseTap.new,
+        widget('SizedBox(height: 40.h, child: $_button)'),
+      ),
+      widget('SizedBox(height: 40.tap, child: $_button)'),
+    );
+  }
+
+  Future<void> test_fix_swapsScreenutilImport() async {
+    expect(
+      await applyFix(
+        UseTap.new,
+        widget(
+          'SizedBox(height: 40.h, child: $_button)',
+          imports: material + screenUtil,
+        ),
+      ),
+      widget(
+        'SizedBox(height: 40.tap, child: $_button)',
+        imports: material + fitExtensions,
+      ),
+    );
+  }
 }

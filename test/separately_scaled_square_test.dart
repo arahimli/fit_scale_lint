@@ -1,82 +1,93 @@
+// Test methods are named test_* for test_reflective_loader.
+// ignore_for_file: non_constant_identifier_names
+
+import 'package:analyzer/analysis_rule/analysis_rule.dart';
 import 'package:fit_scale_lint/fit_scale_lint.dart';
 import 'package:test/test.dart';
+import 'package:test_reflective_loader/test_reflective_loader.dart';
 
 import 'support.dart';
 
 void main() {
-  const rule = SeparatelyScaledSquare();
-
-  group('reports', () {
-    test('SizedBox, Container and any widget with width/height', () async {
-      expect(
-        await lints(
-          rule,
-          widget(
-            'Column(children: [\n'
-            '  SizedBox(width: 56.w, height: 56.h),\n'
-            '  Container(width: n.w, height: n.h),\n'
-            "  Image.asset('a.png', width: 32.w, height: 32.h),\n"
-            '])',
-          ),
-        ),
-        ['SizedBox', 'Container', 'Image.asset'],
-      );
-    });
+  defineReflectiveSuite(() {
+    defineReflectiveTests(SeparatelyScaledSquareTest);
   });
+}
 
-  group('does not report', () {
-    for (final entry in {
-      'different sizes': 'SizedBox(width: 120.w, height: 48.h)',
-      '.r on both sides': 'SizedBox(width: 56.r, height: 56.r)',
-      '.w on both sides': 'SizedBox(width: 56.w, height: 56.w)',
-      'plain numbers': 'SizedBox(width: 56, height: 56)',
-    }.entries) {
-      test(entry.key, () async {
-        expect(await lints(rule, widget(entry.value)), isEmpty);
-      });
-    }
-  });
+@reflectiveTest
+class SeparatelyScaledSquareTest extends FitRuleTest {
+  @override
+  AnalysisRule createRule() => SeparatelyScaledSquare();
 
-  group('quick fix', () {
-    test('SizedBox -> FitSquare', () async {
-      expect(
-        await applyFix(
-          rule,
-          widget('SizedBox(width: 56.w, height: 56.h, child: CircleAvatar())'),
-        ),
-        widget('FitSquare(size: 56, child: CircleAvatar())'),
-      );
-    });
-
-    test('FitSquare adds the import and keeps the key', () async {
-      expect(
-        await applyFix(
-          rule,
-          widget(
-            "SizedBox(key: Key('k'), width: 56.w, height: 56.h)",
-            imports: material + screenUtil,
-          ),
-        ),
+  Future<void> test_reports() async {
+    expect(
+      await lints(
         widget(
-          "FitSquare(key: Key('k'), size: 56)",
-          imports: fitScale + material + screenUtil,
+          'Column(children: [\n'
+          '  SizedBox(width: 56.w, height: 56.h),\n'
+          '  Container(width: n.w, height: n.h),\n'
+          "  Image.asset('a.png', width: 32.w, height: 32.h),\n"
+          '])',
         ),
-      );
-    });
+      ),
+      ['SizedBox', 'Container', 'Image.asset'],
+    );
+  }
 
-    test('.r for both sides', () async {
-      expect(
-        await applyFix(
-          rule,
-          widget('Container(width: n.w, height: n.h)'),
+  Future<void> test_noReport() async {
+    for (final code in [
+      'SizedBox(width: 120.w, height: 48.h)',
+      'SizedBox(width: 56.r, height: 56.r)',
+      'SizedBox(width: 56.w, height: 56.w)',
+      'SizedBox(width: 56, height: 56)',
+    ]) {
+      expect(await lints(widget(code)), isEmpty, reason: code);
+    }
+  }
+
+  Future<void> test_fix_fitSquare() async {
+    expect(
+      await applyFix(
+        UseFitSquare.new,
+        widget('SizedBox(width: 56.w, height: 56.h, child: CircleAvatar())'),
+      ),
+      widget('FitSquare(size: 56, child: CircleAvatar())'),
+    );
+  }
+
+  Future<void> test_fix_fitSquareAddsImportKeepsKey() async {
+    expect(
+      await applyFix(
+        UseFitSquare.new,
+        widget(
+          "SizedBox(key: Key('k'), width: 56.w, height: 56.h)",
+          imports: material + screenUtil,
         ),
-        widget('Container(width: n.r, height: n.r)'),
-      );
-    });
+      ),
+      widget(
+        "FitSquare(key: Key('k'), size: 56)",
+        imports: fitScale + material + screenUtil,
+      ),
+    );
+  }
 
-    test('one fix per lint', () async {
-      // `dart run custom_lint --fix` applies every fix a lint offers.
-      expect(SeparatelyScaledSquare().getFixes(), hasLength(1));
-    });
-  });
+  Future<void> test_fix_fitSquareNotForContainer() async {
+    expect(
+      await applyFix(
+        UseFitSquare.new,
+        widget('Container(width: n.w, height: n.h)'),
+      ),
+      isNull,
+    );
+  }
+
+  Future<void> test_fix_r() async {
+    expect(
+      await applyFix(
+        ScaleBothSidesWithR.new,
+        widget('Container(width: n.w, height: n.h)'),
+      ),
+      widget('Container(width: n.r, height: n.r)'),
+    );
+  }
 }

@@ -5,9 +5,9 @@ import 'fixed_height_around_text.dart';
 import 'separately_scaled_square.dart';
 import 'tap_height_with_h.dart';
 
-/// Run `dart run custom_lint` in this folder. Each "expect_lint" comment
-/// in lib/ marks the next line as one that must report that rule; any
-/// other report, or a marked line without one, fails the run.
+/// Run `dart run tool/check_example.dart` in the repository root. Each
+/// "expect_lint" comment in lib/ marks the next line as one that must
+/// report that rule; any other report, or a marked line without one, fails.
 void main() => runApp(const ExampleApp());
 
 class ExampleApp extends StatelessWidget {

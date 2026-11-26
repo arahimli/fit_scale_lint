@@ -1,85 +1,111 @@
+import 'package:analysis_server_plugin/edit/dart/correction_producer.dart';
+import 'package:analysis_server_plugin/edit/dart/dart_fix_kind_priority.dart';
+import 'package:analyzer/analysis_rule/analysis_rule.dart';
+import 'package:analyzer/analysis_rule/rule_context.dart';
+import 'package:analyzer/analysis_rule/rule_visitor_registry.dart';
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/error/error.dart' show AnalysisError, ErrorSeverity;
-import 'package:analyzer/error/listener.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/error/error.dart';
 import 'package:analyzer/source/source_range.dart';
-import 'package:custom_lint_builder/custom_lint_builder.dart';
+import 'package:analyzer_plugin/utilities/change_builder/change_builder_core.dart';
+import 'package:analyzer_plugin/utilities/fixes/fixes.dart';
 
 import '../fix_utils.dart';
 
 /// `import 'package:flutter_screenutil/flutter_screenutil.dart';`
 ///
-/// fit_scale's extensions have the same names (`.w .h .r .sp .sw .sh`)
-/// but clamp the scale factors, so swapping the import is the first step
-/// of a migration.
-class ScreenutilImport extends DartLintRule {
-  const ScreenutilImport() : super(code: _code);
+/// fit_scale's extensions have the same names (`.w .h .r .sp .sw .sh`) but
+/// clamp the scale factors, so swapping the import is the first step of a
+/// migration.
+class ScreenutilImport extends AnalysisRule {
+  ScreenutilImport()
+    : super(
+        name: 'screenutil_import',
+        description:
+            'flutter_screenutil scales without limits: fixed '
+            'heights overflow and touch targets shrink on small screens.',
+      );
 
-  static const _code = LintCode(
-    name: 'screenutil_import',
-    problemMessage:
-        'flutter_screenutil scales without limits: fixed heights overflow '
-        'and touch targets shrink on small screens.',
+  static const LintCode code = LintCode(
+    'screenutil_import',
+    'flutter_screenutil scales without limits: fixed heights overflow and '
+        'touch targets shrink on small screens.',
     correctionMessage:
-        "Import 'package:fit_scale/extensions.dart' (same .w/.h/.r/.sp "
-        'names) and replace ScreenUtilInit with FitScaleScope.',
-    errorSeverity: ErrorSeverity.INFO,
-    url: 'https://pub.dev/packages/fit_scale_lint#screenutil_import',
+        "Try 'package:fit_scale/extensions.dart' (same "
+        '.w/.h/.r/.sp names) and FitScaleScope instead of ScreenUtilInit.',
+    severity: DiagnosticSeverity.INFO,
   );
 
-  static bool _matches(ImportDirective node) =>
+  @override
+  LintCode get diagnosticCode => code;
+
+  static bool matches(ImportDirective node) =>
       node.uri.stringValue?.startsWith(screenUtilPackage) ?? false;
 
   @override
-  void run(
-    CustomLintResolver resolver,
-    ErrorReporter reporter,
-    CustomLintContext context,
+  void registerNodeProcessors(
+    RuleVisitorRegistry registry,
+    RuleContext context,
   ) {
-    context.registry.addImportDirective((node) {
-      if (_matches(node)) reporter.atNode(node.uri, _code);
-    });
+    registry.addImportDirective(this, _Visitor(this));
   }
-
-  @override
-  List<Fix> getFixes() => [_UseFitExtensions()];
 }
 
-class _UseFitExtensions extends DartFix {
+class _Visitor extends SimpleAstVisitor<void> {
+  _Visitor(this.rule);
+
+  final AnalysisRule rule;
+
   @override
-  void run(
-    CustomLintResolver resolver,
-    ChangeReporter reporter,
-    CustomLintContext context,
-    AnalysisError analysisError,
-    List<AnalysisError> others,
-  ) {
-    context.registry.addImportDirective((node) {
-      if (node.uri.offset != analysisError.offset ||
-          !ScreenutilImport._matches(node)) {
-        return;
+  void visitImportDirective(ImportDirective node) {
+    if (ScreenutilImport.matches(node)) rule.reportAtNode(node.uri);
+  }
+}
+
+/// Swaps the import for fit_scale's extensions, or removes it when those
+/// are already imported.
+class UseFitExtensions extends ResolvedCorrectionProducer {
+  UseFitExtensions({required super.context});
+
+  static const _kind = FixKind(
+    'fit_scale_lint.fix.useFitExtensions',
+    DartFixKindPriority.standard,
+    "Import 'package:fit_scale/extensions.dart' instead",
+  );
+
+  @override
+  CorrectionApplicability get applicability =>
+      CorrectionApplicability.singleLocation;
+
+  @override
+  FixKind get fixKind => _kind;
+
+  @override
+  Future<void> compute(ChangeBuilder builder) async {
+    final offset = diagnostic?.offset;
+    ImportDirective? import;
+    for (final d in unit.directives) {
+      if (d is ImportDirective && d.uri.offset == offset) import = d;
+    }
+    if (import == null || !ScreenutilImport.matches(import)) return;
+    final directive = import;
+    final alreadyImported = unit.directives.any(
+      (d) => d is ImportDirective && d.uri.stringValue == fitExtensionsUri,
+    );
+
+    await builder.addDartFileEdit(file, (builder) {
+      if (alreadyImported) {
+        // The whole line, so no blank line is left behind.
+        final end = unit.lineInfo.getOffsetOfLineAfter(directive.end);
+        builder.addDeletion(
+          SourceRange(directive.offset, end - directive.offset),
+        );
+      } else {
+        builder.addSimpleReplacement(
+          SourceRange(directive.uri.offset, directive.uri.length),
+          "'$fitExtensionsUri'",
+        );
       }
-      final unit = node.parent! as CompilationUnit;
-      final alreadyImported = unit.directives.any(
-        (d) => d is ImportDirective && d.uri.stringValue == fitExtensionsUri,
-      );
-      final change = reporter.createChangeBuilder(
-        message: alreadyImported
-            ? 'Remove the flutter_screenutil import'
-            : "Import 'package:fit_scale/extensions.dart' instead",
-        priority: 80,
-      );
-      change.addDartFileEdit((builder) {
-        if (alreadyImported) {
-          // The whole line, so no blank line is left behind.
-          final end = unit.lineInfo.getOffsetOfLineAfter(node.end);
-          builder.addDeletion(SourceRange(node.offset, end - node.offset));
-        } else {
-          builder.addSimpleReplacement(
-            SourceRange(node.uri.offset, node.uri.length),
-            "'$fitExtensionsUri'",
-          );
-        }
-      });
     });
   }
 }

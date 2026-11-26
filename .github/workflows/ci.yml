@@ -12,11 +12,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Lowest version supported (custom_lint 0.7 / analyzer 6), and the
-        # latest stable (an empty version means latest on the channel).
+        # Lowest version with analyzer plugins (Dart 3.10, analyzer 12),
+        # and the latest stable (an empty version means latest).
         include:
-          - flutter: '3.24.5'
-            version: '3.24.5'
+          - flutter: '3.38.9'
+            version: '3.38.9'
           - flutter: stable
             version: ''
     steps:
@@ -28,37 +28,25 @@ jobs:
           channel: stable
           cache: true
 
-      # The tests resolve their sources inside example/, so it needs its
-      # packages too.
       - run: flutter pub get
       - run: flutter pub get
         working-directory: example
 
-      # The formatter's style changed in Dart 3.7; check with the latest.
+      # The formatter's style follows the SDK; check with the latest.
       - name: Format
         if: matrix.flutter == 'stable'
-        run: dart format --output=none --set-exit-if-changed lib test example/lib
+        run: dart format --output=none --set-exit-if-changed lib test tool example/lib
 
       - name: Analyze
         run: dart analyze --fatal-infos
 
       - run: dart test
 
-      # Newer SDKs warn that legacy analyzer plugins (custom_lint) are
-      # deprecated, and Flutter 3.47+ deprecates material.dart; neither
-      # fails the build. Errors still do.
-      - name: Analyze example
-        working-directory: example
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      # Loads the plugin into the real analysis server on example/: every
+      # rule must report exactly on the lines marked expect_lint.
+      - name: Check the example
+        run: dart run tool/check_example.dart
 
-      # Every rule must report exactly on the lines marked expect_lint,
-      # and nothing else may report.
-      - name: custom_lint on the example
-        working-directory: example
-        run: dart run custom_lint
-
-      # Newer SDK tooling may rewrite example/analysis_options.yaml while
-      # analyzing; show what changed, then publish from a clean tree.
       - name: Publish dry run
         if: matrix.flutter == 'stable'
         run: |
